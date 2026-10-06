@@ -34,12 +34,15 @@
         <Grid x:Name="Viewport" ClipToBounds="True" Background="Transparent" ContextMenu="{StaticResource MainMenu}"
               MouseLeftButtonDown="Viewport_MouseLeftButtonDown" MouseLeftButtonUp="Viewport_MouseLeftButtonUp"
               MouseMove="Viewport_MouseMove" MouseWheel="Viewport_MouseWheel" SizeChanged="Viewport_SizeChanged">
-            <Image x:Name="ImageView" HorizontalAlignment="Left" VerticalAlignment="Top" Stretch="Fill"
-                   RenderOptions.BitmapScalingMode="HighQuality">
-                <Image.RenderTransform>
-                    <MatrixTransform x:Name="ImageTransform"/>
-                </Image.RenderTransform>
-            </Image>
+            <!-- A Canvas never clips its children to the layout size, so the full image survives being scaled down;
+                 the viewport's ClipToBounds does the clipping instead. -->
+            <Canvas>
+                <Image x:Name="ImageView" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality">
+                    <Image.RenderTransform>
+                        <MatrixTransform x:Name="ImageTransform"/>
+                    </Image.RenderTransform>
+                </Image>
+            </Canvas>
             <TextBlock x:Name="MessageText" Foreground="#999" FontSize="15" TextWrapping="Wrap" TextAlignment="Center"
                        HorizontalAlignment="Center" VerticalAlignment="Center" Margin="40"
                        Text="Drop an image here, or press Ctrl+O"/>
@@ -75,7 +78,8 @@
 
         <!-- Toolbar, shown when hovering near the top edge -->
         <Border x:Name="Toolbar" VerticalAlignment="Top" Height="40" Background="#D0101010" Opacity="0"
-                MouseLeftButtonDown="Toolbar_MouseLeftButtonDown">
+                MouseLeftButtonDown="Toolbar_MouseLeftButtonDown" MouseMove="Toolbar_MouseMove"
+                MouseLeftButtonUp="Toolbar_MouseLeftButtonUp">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <Button Style="{StaticResource ToolButton}" Content="&#xE7AD;" ToolTip="Rotate clockwise (R)" Click="RotateButton_Click"/>

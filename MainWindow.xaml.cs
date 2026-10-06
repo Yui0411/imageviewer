@@ -35,6 +35,7 @@ public partial class MainWindow : Window
 
     private bool _fullscreen;
     private bool _maximizedBeforeFullscreen;
+    private Point? _toolbarPress;
 
     // Rotation: presses made while a save is running are added up and saved together.
     private bool _rotating;
@@ -651,8 +652,50 @@ public partial class MainWindow : Window
 
     private void Toolbar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ClickCount == 2) ToggleMaximize();
-        else if (WindowState == WindowState.Normal) DragMove();
+        if (e.ClickCount == 2)
+        {
+            ToggleMaximize();
+        }
+        else if (WindowState == WindowState.Normal)
+        {
+            DragMove();
+        }
+        else
+        {
+            // Maximized or fullscreen: wait to see if this becomes a drag, which restores the window (like a title bar).
+            _toolbarPress = e.GetPosition(this);
+            Toolbar.CaptureMouse();
+        }
+    }
+
+    private void Toolbar_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_toolbarPress is not { } press || e.LeftButton != MouseButtonState.Pressed) return;
+        var current = e.GetPosition(this);
+        if (Math.Abs(current.X - press.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(current.Y - press.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        EndToolbarPress();
+        double relativeX = press.X / ActualWidth;
+        var cursor = PointToScreen(current);
+        if (PresentationSource.FromVisual(this)?.CompositionTarget is { } target)
+            cursor = target.TransformFromDevice.Transform(cursor);
+
+        _fullscreen = false;
+        WindowState = WindowState.Normal;
+        // Keep the cursor over the same relative spot of the toolbar in the restored window.
+        Left = cursor.X - relativeX * Width;
+        Top = cursor.Y - press.Y;
+        DragMove();
+    }
+
+    private void Toolbar_MouseLeftButtonUp(object sender, MouseButtonEventArgs e) => EndToolbarPress();
+
+    private void EndToolbarPress()
+    {
+        _toolbarPress = null;
+        Toolbar.ReleaseMouseCapture();
     }
 
     private void PrevButton_Click(object sender, RoutedEventArgs e) => Navigate(-1);
