@@ -428,6 +428,11 @@ public partial class MainWindow
             ShowToast("Drag the edges of the crop box to choose what to keep.", warning: false);
             return;
         }
+        if (!saveCopy && !Confirm(
+                $"Crop {Path.GetFileName(path)} to {rect.Width} × {rect.Height} and overwrite it?\n\n" +
+                "Everything outside the box will be removed from the file. You can undo with Ctrl+Z " +
+                "until you move to another image."))
+            return; // stay in crop mode so the box can be adjusted
 
         SetCropSaving(true);
         try
