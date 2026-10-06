@@ -682,8 +682,7 @@ public partial class MainWindow : Window
         if (PresentationSource.FromVisual(this)?.CompositionTarget is { } target)
             cursor = target.TransformFromDevice.Transform(cursor);
 
-        _fullscreen = false;
-        WindowState = WindowState.Normal;
+        LeaveFullscreen();
         // Keep the cursor over the same relative spot of the toolbar in the restored window.
         Left = cursor.X - relativeX * Width;
         Top = cursor.Y - press.Y;
@@ -748,7 +747,10 @@ public partial class MainWindow : Window
         else WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
     }
 
-    /// <summary>Fullscreen is a maximize that covers the whole monitor (see <see cref="NativeMethods.ApplyMaximizedBounds"/>).</summary>
+    /// <summary>
+    /// Fullscreen is a maximize that covers the whole monitor (see <see cref="NativeMethods.ApplyMaximizedBounds"/>),
+    /// with the resize frame removed — Windows only hides the taskbar for frameless windows covering the monitor.
+    /// </summary>
     private void SetFullscreen(bool on)
     {
         if (on == _fullscreen) return;
@@ -757,14 +759,21 @@ public partial class MainWindow : Window
             _maximizedBeforeFullscreen = WindowState == WindowState.Maximized;
             _fullscreen = true;
             WindowState = WindowState.Normal;
+            ResizeMode = ResizeMode.NoResize;
             WindowState = WindowState.Maximized;
         }
         else
         {
-            _fullscreen = false;
-            WindowState = WindowState.Normal;
+            LeaveFullscreen();
             if (_maximizedBeforeFullscreen) WindowState = WindowState.Maximized;
         }
+    }
+
+    private void LeaveFullscreen()
+    {
+        _fullscreen = false;
+        WindowState = WindowState.Normal;
+        ResizeMode = ResizeMode.CanResize;
     }
 
     private void Window_StateChanged(object sender, EventArgs e)
