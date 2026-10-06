@@ -26,7 +26,8 @@ internal static class ImageLoader
         return new LoadedImage(path, bitmap, lastWrite);
     }
 
-    private static int ReadOrientation(BitmapFrame frame)
+    /// <summary>EXIF orientation (1–8); 1 (upright) when absent or unreadable.</summary>
+    public static int ReadOrientation(BitmapFrame frame)
     {
         try
         {

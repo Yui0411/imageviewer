@@ -34,11 +34,23 @@
         <Button x:Name="NextButton" Style="{StaticResource NavButton}" HorizontalAlignment="Right"
                 Opacity="0" Content="&#xE76C;" ToolTip="Next (→)" Click="NextButton_Click"/>
 
+        <!-- Short-lived notice, e.g. why a rotation was refused -->
+        <Border x:Name="Toast" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="20,0,20,28"
+                Padding="14,10" CornerRadius="6" Background="#EE202020" MaxWidth="560"
+                Opacity="0" IsHitTestVisible="False">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="ToastIcon" FontFamily="{StaticResource IconFont}" Text="&#xE7BA;" Foreground="#FFC83D"
+                           FontSize="16" Margin="0,1,10,0" VerticalAlignment="Top"/>
+                <TextBlock x:Name="ToastText" Foreground="White" FontSize="13" TextWrapping="Wrap" MaxWidth="500"/>
+            </StackPanel>
+        </Border>
+
         <!-- Toolbar, shown when hovering near the top edge -->
         <Border x:Name="Toolbar" VerticalAlignment="Top" Height="40" Background="#D0101010" Opacity="0"
                 MouseLeftButtonDown="Toolbar_MouseLeftButtonDown">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource ToolButton}" Content="&#xE7AD;" ToolTip="Rotate clockwise (R)" Click="RotateButton_Click"/>
                     <Button Style="{StaticResource ToolButton}" Content="&#xE8E5;" ToolTip="Open (Ctrl+O)" Click="OpenButton_Click"/>
                     <Button Style="{StaticResource ToolButton}" Content="&#xE740;" ToolTip="Fullscreen (F11)" Click="FullscreenButton_Click"/>
                     <Button Style="{StaticResource ToolButton}" Content="&#xE921;" ToolTip="Minimize" Click="MinimizeButton_Click"/>

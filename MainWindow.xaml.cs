@@ -4,6 +4,8 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Microsoft.Win32;
 
 namespace ImageViewer;
@@ -34,10 +36,22 @@ public partial class MainWindow : Window
     private bool _fullscreen;
     private bool _maximizedBeforeFullscreen;
 
+    // Rotation: presses made while a save is running are added up and saved together.
+    private bool _rotating;
+    private string? _rotatingPath;
+    private int _pendingTurns;
+
+    private readonly DispatcherTimer _toastTimer = new();
+
     public MainWindow()
     {
         InitializeComponent();
         RestorePlacement();
+        _toastTimer.Tick += (_, _) =>
+        {
+            _toastTimer.Stop();
+            Toast.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(400)));
+        };
     }
 
     public void OpenFile(string path)
@@ -139,6 +153,97 @@ public partial class MainWindow : Window
         MessageText.Text = text;
         MessageText.Visibility = Visibility.Visible;
     }
+
+    private void ShowToast(string text, bool warning = true)
+    {
+        ToastText.Text = text;
+        ToastIcon.Visibility = warning ? Visibility.Visible : Visibility.Collapsed;
+        Toast.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
+        _toastTimer.Interval = TimeSpan.FromSeconds(warning ? 5 : 2.5);
+        _toastTimer.Stop();
+        _toastTimer.Start();
+    }
+
+    // ---------------------------------------------------------------- rotation
+
+    /// <summary>
+    /// Rotates the current image and overwrites the file. The view turns immediately; the lossless save runs in the
+    /// background, and if it is refused the view reverts and the reason is shown.
+    /// </summary>
+    private async void Rotate(int clockwiseTurns)
+    {
+        var path = _nav.Current;
+        if (path == null || _image == null) return;
+        if (!ImageRotator.CanRotate(path))
+        {
+            ShowToast($"Rotating {Path.GetExtension(path).TrimStart('.').ToUpperInvariant()} files isn't supported.");
+            return;
+        }
+        if (_rotating && !SamePath(path, _rotatingPath))
+        {
+            ShowToast("Still saving the previous rotation…", warning: false);
+            return;
+        }
+
+        try
+        {
+            // Turns already queued haven't been saved yet, so check against the file's current state plus all of them.
+            ImageRotator.EnsureCanRotate(path, _pendingTurns + clockwiseTurns);
+        }
+        catch (Exception ex) when (ex is RotateException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            ShowToast(ex is RotateException ? ex.Message : $"Couldn't rotate: {ex.Message}");
+            return;
+        }
+
+        ShowRotatedPreview(clockwiseTurns);
+        _pendingTurns += clockwiseTurns;
+        if (_rotating) return; // the running save loop will pick these turns up
+
+        _rotating = true;
+        _rotatingPath = path;
+        string? error = null;
+        try
+        {
+            int turns;
+            while ((turns = ((_pendingTurns % 4) + 4) % 4) != 0)
+            {
+                _pendingTurns = 0;
+                await Task.Run(() => ImageRotator.Rotate(path, turns));
+            }
+        }
+        catch (RotateException ex)
+        {
+            error = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            error = $"Couldn't rotate: {ex.Message}";
+        }
+        finally
+        {
+            _pendingTurns = 0;
+            _rotating = false;
+            _rotatingPath = null;
+        }
+
+        if (error != null) ShowToast(error);
+        _cache.Remove(path);
+        if (SamePath(_nav.Current, path)) ShowCurrent(); // show the saved file (or the untouched one, if refused)
+    }
+
+    private void ShowRotatedPreview(int clockwiseTurns)
+    {
+        if (_image == null) return;
+        var preview = new TransformedBitmap(_image.Bitmap, new RotateTransform(90 * clockwiseTurns));
+        preview.Freeze();
+        _image = _image with { Bitmap = preview };
+        ImageView.Source = preview;
+        UpdateImageSize();
+        FitToWindow();
+    }
+
+    private static bool SamePath(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
     private void UpdateInfo()
     {
@@ -343,6 +448,7 @@ public partial class MainWindow : Window
             case Key.OemPlus or Key.Add: ZoomTo(_scale * ZoomStep, ViewportCenter); break;
             case Key.OemMinus or Key.Subtract: ZoomTo(_scale / ZoomStep, ViewportCenter); break;
             case Key.O when ctrl: ShowOpenDialog(); break;
+            case Key.R when !ctrl: Rotate(Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 3 : 1); break;
             default: return;
         }
         e.Handled = true;
@@ -362,6 +468,7 @@ public partial class MainWindow : Window
 
     private void PrevButton_Click(object sender, RoutedEventArgs e) => Navigate(-1);
     private void NextButton_Click(object sender, RoutedEventArgs e) => Navigate(1);
+    private void RotateButton_Click(object sender, RoutedEventArgs e) => Rotate(1);
     private void OpenButton_Click(object sender, RoutedEventArgs e) => ShowOpenDialog();
     private void FullscreenButton_Click(object sender, RoutedEventArgs e) => SetFullscreen(!_fullscreen);
     private void MinimizeButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
