@@ -20,6 +20,18 @@
             <MenuItem Header="Crop…" InputGestureText="C" Click="CropButton_Click"/>
             <MenuItem Tag="undo" Header="Undo crop" InputGestureText="Ctrl+Z" Click="UndoCrop_Click"/>
             <Separator/>
+            <MenuItem Header="Favourites" SubmenuOpened="FavouritesMenu_SubmenuOpened">
+                <MenuItem Tag="toggle" Header="Favourite" InputGestureText="F" IsCheckable="False" Click="FavouriteMenu_Click"/>
+                <MenuItem Tag="only" Header="Show favourites only" InputGestureText="Shift+F" Click="FavouritesOnlyMenu_Click"/>
+                <Separator/>
+                <MenuItem Header="Copy favourites to…" Click="CopyFavourites_Click"/>
+                <MenuItem Header="Move favourites to…" Click="MoveFavourites_Click"/>
+                <MenuItem Header="Copy to “Favourites” subfolder" Click="CopyFavouritesToSubfolder_Click"/>
+                <MenuItem Header="Move to “Favourites” subfolder" Click="MoveFavouritesToSubfolder_Click"/>
+                <Separator/>
+                <MenuItem Header="Clear favourites in this folder…" Click="ClearFavourites_Click"/>
+            </MenuItem>
+            <Separator/>
             <MenuItem Header="Copy" InputGestureText="Ctrl+C" Click="Copy_Click"/>
             <MenuItem Header="Show in Explorer" InputGestureText="Ctrl+E" Click="ShowInExplorer_Click"/>
             <MenuItem Header="Delete" InputGestureText="Del" Click="Delete_Click"/>
@@ -97,6 +109,15 @@
             </WrapPanel>
         </Border>
 
+        <!-- Shown briefly (and with the toolbar) when the current image is a favourite -->
+        <TextBlock x:Name="FavouriteBadge" FontFamily="{StaticResource IconFont}" Text="&#xEB52;" FontSize="22"
+                   Foreground="#FF4D6D" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="18,0,0,18"
+                   Opacity="0" IsHitTestVisible="False">
+            <TextBlock.Effect>
+                <DropShadowEffect BlurRadius="6" ShadowDepth="0" Opacity="0.8"/>
+            </TextBlock.Effect>
+        </TextBlock>
+
         <!-- Short-lived notice, e.g. why a rotation was refused -->
         <Border x:Name="Toast" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="20,0,20,28"
                 Padding="14,10" CornerRadius="6" Background="#EE202020" MaxWidth="560"
@@ -125,6 +146,7 @@
                 MouseLeftButtonUp="Toolbar_MouseLeftButtonUp">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="FavouriteButton" Style="{StaticResource ToolButton}" Content="&#xEB51;" ToolTip="Add to favourites (F)" Click="FavouriteButton_Click"/>
                     <Button x:Name="CropButton" Style="{StaticResource ToolButton}" Content="&#xE7A8;" ToolTip="Crop (C)" Click="CropButton_Click"/>
                     <Button Style="{StaticResource ToolButton}" Content="&#xE7AD;" ToolTip="Rotate clockwise (R)" Click="RotateButton_Click"/>
                     <Button Style="{StaticResource ToolButton}" Content="&#xE712;" ToolTip="More" Click="MoreButton_Click"/>

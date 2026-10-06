@@ -10,6 +10,7 @@ and the previous/next buttons appear when you move the mouse near the top or the
 | ← / → | Previous / next image in the folder (Explorer name order) |
 | Home / End | First / last image |
 | R / Shift+R | Rotate clockwise / counter-clockwise — **overwrites the file** |
+| F / Shift+F | Add to / remove from favourites · show favourites only |
 | C | Crop (see below) |
 | Ctrl+Z | Undo the last crop (until you move to another image) |
 | Scroll, + / − | Zoom toward the cursor |
@@ -33,6 +34,20 @@ and the previous/next buttons appear when you move the mouse near the top or the
 - The EXIF orientation tag is taken into account and reset, and camera metadata is kept.
 - Before the original is replaced, the new file is decoded and compared against the expected pixels; if anything
   doesn't match, the file isn't changed.
+
+## Favourites
+
+For picking the best shots: press **F** (or the heart in the toolbar) on the ones you like. The toolbar shows how
+many are marked, and **Shift+F** shows only them, so ← / → skips everything else.
+
+Then, from the menu (right-click → **Favourites**):
+
+- **Copy favourites to…** / **Move favourites to…** a folder you choose, or straight into a **Favourites**
+  subfolder. Moving asks first; nothing is ever overwritten (a clash becomes `name (2).jpg`); copies keep their
+  modified date. The viewer stays in the current folder.
+- **Clear favourites in this folder…** when you're done.
+
+Marks are kept in `%AppData%\ImageViewer\favourites.json`; the photos themselves aren't changed.
 
 ## Cropping
 

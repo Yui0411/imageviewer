@@ -53,6 +53,7 @@ public partial class MainWindow : Window
         RestorePlacement();
         BuildHelp();
         BuildCropBar();
+        InitFavourites();
         _animationTimer.Tick += AnimationTimer_Tick;
         _toastTimer.Tick += (_, _) =>
         {
@@ -69,6 +70,8 @@ public partial class MainWindow : Window
             return;
         }
         ExitCrop();
+        _favouritesOnly = false; // a newly opened file starts with all images shown
+        _nav.Filter = null;
         _nav.Open(path);
         ShowCurrent();
     }
@@ -82,6 +85,8 @@ public partial class MainWindow : Window
 
         int version = ++_loadVersion;
         if (_undo is { } undo && !SamePath(undo.Path, path)) _undo = null; // undo only lasts while on the cropped image
+        RefreshFavouriteCount();
+        UpdateFavouriteUi(flash: true);
         FileNameText.Text = Path.GetFileName(path);
         Title = $"{Path.GetFileName(path)} - Image Viewer";
 
@@ -144,6 +149,8 @@ public partial class MainWindow : Window
         _undo = null;
         _animationTimer.Stop();
         ImageView.Source = null;
+        RefreshFavouriteCount();
+        UpdateFavouriteUi(flash: false);
         FileNameText.Text = "";
         Title = "Image Viewer";
         ShowMessage("Drop an image here, or press Ctrl+O");
@@ -183,11 +190,10 @@ public partial class MainWindow : Window
         if (_nav.Move(offset)) ShowCurrent();
     }
 
-    private void GoTo(int index)
+    private void GoToEdge(bool last)
     {
-        if (_nav.Count == 0 || index == _nav.Index) return;
-        _nav.MoveTo(index);
-        ShowCurrent();
+        var before = _nav.Current;
+        if (_nav.MoveToEdge(last) && !SamePath(before, _nav.Current)) ShowCurrent();
     }
 
     private void ShowMessage(string text)
@@ -311,7 +317,9 @@ public partial class MainWindow : Window
         }
 
         _cache.Remove(path);
+        _favourites.Remove(new[] { path });
         _nav.RemoveCurrent();
+        if (_favouritesOnly && !IsCurrentFavourite && !_nav.Move(1)) SetFavouritesOnly(false);
         if (_nav.Current == null) ShowEmpty();
         else ShowCurrent();
         ShowToast($"Moved {Path.GetFileName(path)} to the Recycle Bin", warning: false);
@@ -388,6 +396,8 @@ public partial class MainWindow : Window
         ("Home / End", "First / last image"),
         ("R", "Rotate clockwise (saves the file)"),
         ("Shift+R", "Rotate counter-clockwise"),
+        ("F", "Add to / remove from favourites"),
+        ("Shift+F", "Show favourites only / show all"),
         ("C", "Crop (Enter applies, Esc cancels)"),
         ("Ctrl+Z", "Undo the last crop"),
         ("Scroll, + / −", "Zoom"),
@@ -450,7 +460,9 @@ public partial class MainWindow : Window
             InfoText.Text = "";
             return;
         }
-        var parts = new List<string> { $"{_nav.Index + 1} / {_nav.Count}" };
+        var (position, total) = _nav.Position();
+        var parts = new List<string> { _favouritesOnly ? $"♥ {position} / {total}" : $"{position} / {total}" };
+        if (!_favouritesOnly && _folderFavouriteCount > 0) parts.Add($"♥ {_folderFavouriteCount}");
         if (_image != null)
         {
             parts.Add($"{_image.Bitmap.PixelWidth} × {_image.Bitmap.PixelHeight}");
@@ -671,6 +683,7 @@ public partial class MainWindow : Window
         bool nearTop = p.Y <= Toolbar.ActualHeight + 20;
         bool canNavigate = _nav.Count > 1 && !_cropping;
         Fade(Toolbar, nearTop);
+        if (IsCurrentFavourite && !_badgeTimer.IsEnabled) Fade(FavouriteBadge, nearTop);
         Fade(PrevButton, canNavigate && !nearTop && p.X <= SideHoverWidth);
         Fade(NextButton, canNavigate && !nearTop && p.X >= Root.ActualWidth - SideHoverWidth);
     }
@@ -679,6 +692,7 @@ public partial class MainWindow : Window
     {
         if (_panning) return;
         Fade(Toolbar, false);
+        if (!_badgeTimer.IsEnabled) Fade(FavouriteBadge, false);
         Fade(PrevButton, false);
         Fade(NextButton, false);
     }
@@ -722,8 +736,8 @@ public partial class MainWindow : Window
         {
             case Key.Right or Key.PageDown: Navigate(1); break;
             case Key.Left or Key.PageUp: Navigate(-1); break;
-            case Key.Home: GoTo(0); break;
-            case Key.End: GoTo(_nav.Count - 1); break;
+            case Key.Home: GoToEdge(last: false); break;
+            case Key.End: GoToEdge(last: true); break;
             case Key.F11: SetFullscreen(!_fullscreen); break;
             case Key.Escape:
                 if (_fullscreen) SetFullscreen(false);
@@ -739,6 +753,8 @@ public partial class MainWindow : Window
             case Key.Delete: DeleteCurrent(); break;
             case Key.F1: ToggleHelp(true); break;
             case Key.C when !ctrl: EnterCrop(); break;
+            case Key.F when !ctrl && Keyboard.Modifiers.HasFlag(ModifierKeys.Shift): ToggleFavouritesOnly(); break;
+            case Key.F when !ctrl: ToggleFavourite(); break;
             case Key.Z when ctrl: UndoCrop(); break;
             default: return;
         }
