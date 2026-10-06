@@ -24,11 +24,22 @@ internal static class ImageLoader
             return new LoadedImage(path, animation.Frames[0], lastWrite, animation.Frames, animation.Delays);
 
         var frame = decoder.Frames[0];
-        BitmapSource bitmap = ApplyOrientation(frame, ReadOrientation(frame));
-        if (bitmap != frame)
-            bitmap = new CachedBitmap(bitmap, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
-        bitmap.Freeze();
+        var bitmap = Detach(ApplyOrientation(frame, ReadOrientation(frame)));
         return new LoadedImage(path, bitmap, lastWrite);
+    }
+
+    /// <summary>
+    /// Copies the pixels into a standalone frozen bitmap. A decoded frame stays tied to its decoder, which belongs to
+    /// the background thread that created it; using it from the UI thread (rotating, copying) would throw.
+    /// </summary>
+    private static BitmapSource Detach(BitmapSource source)
+    {
+        int stride = (source.PixelWidth * source.Format.BitsPerPixel + 7) / 8;
+        var pixels = new byte[stride * source.PixelHeight];
+        source.CopyPixels(pixels, stride, 0);
+        var copy = BitmapSource.Create(source.PixelWidth, source.PixelHeight, 96, 96, source.Format, source.Palette, pixels, stride);
+        copy.Freeze();
+        return copy;
     }
 
     /// <summary>EXIF orientation (1–8); 1 (upright) when absent or unreadable.</summary>

@@ -33,18 +33,27 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
 
+    /// <summary>Bounds of the monitor the window is mostly on, in device pixels.</summary>
+    public static RECT? GetMonitorBounds(IntPtr hwnd)
+    {
+        var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (monitor == IntPtr.Zero) return null;
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        return GetMonitorInfo(monitor, ref info) ? info.rcMonitor : null;
+    }
+
     /// <summary>
     /// A borderless window maximizes over the taskbar by default. This sizes the maximized window to the
-    /// monitor's work area, or to the whole monitor when <paramref name="fullscreen"/> is set.
+    /// monitor's work area instead.
     /// </summary>
-    public static void ApplyMaximizedBounds(IntPtr hwnd, IntPtr lParam, bool fullscreen)
+    public static void ApplyMaximizedBounds(IntPtr hwnd, IntPtr lParam)
     {
         var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
         if (monitor == IntPtr.Zero) return;
         var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(monitor, ref info)) return;
 
-        var area = fullscreen ? info.rcMonitor : info.rcWork;
+        var area = info.rcWork;
         var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
         mmi.ptMaxPosition.X = area.Left - info.rcMonitor.Left;
         mmi.ptMaxPosition.Y = area.Top - info.rcMonitor.Top;

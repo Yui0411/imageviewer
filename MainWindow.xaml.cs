@@ -35,6 +35,7 @@ public partial class MainWindow : Window
 
     private bool _fullscreen;
     private bool _maximizedBeforeFullscreen;
+    private Rect _boundsBeforeFullscreen = Rect.Empty;
     private Point? _toolbarPress;
 
     // Rotation: presses made while a save is running are added up and saved together.
@@ -532,7 +533,7 @@ public partial class MainWindow : Window
             Viewport.CaptureMouse();
             ApplyTransform();
         }
-        else if (WindowState == WindowState.Normal)
+        else if (WindowState == WindowState.Normal && !_fullscreen)
         {
             DragMove();
         }
@@ -656,7 +657,7 @@ public partial class MainWindow : Window
         {
             ToggleMaximize();
         }
-        else if (WindowState == WindowState.Normal)
+        else if (WindowState == WindowState.Normal && !_fullscreen)
         {
             DragMove();
         }
@@ -748,19 +749,32 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Fullscreen is a maximize that covers the whole monitor (see <see cref="NativeMethods.ApplyMaximizedBounds"/>),
-    /// with the resize frame removed — Windows only hides the taskbar for frameless windows covering the monitor.
+    /// Fullscreen sizes the (normal-state) window to exactly cover its monitor and keeps it above the taskbar while it
+    /// is the active window. Relying on Windows to detect a maximized window as fullscreen didn't hide the taskbar.
     /// </summary>
     private void SetFullscreen(bool on)
     {
         if (on == _fullscreen) return;
         if (on)
         {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (NativeMethods.GetMonitorBounds(hwnd) is not { } monitor) return;
+
             _maximizedBeforeFullscreen = WindowState == WindowState.Maximized;
+            _boundsBeforeFullscreen = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
             _fullscreen = true;
             WindowState = WindowState.Normal;
             ResizeMode = ResizeMode.NoResize;
-            WindowState = WindowState.Maximized;
+
+            var bounds = new Rect(monitor.Left, monitor.Top, monitor.Right - monitor.Left, monitor.Bottom - monitor.Top);
+            if (PresentationSource.FromVisual(this)?.CompositionTarget is { } target)
+                bounds.Transform(target.TransformFromDevice); // device pixels → WPF units
+            Left = bounds.Left;
+            Top = bounds.Top;
+            Width = bounds.Width;
+            Height = bounds.Height;
+            Topmost = IsActive;
+            Window_StateChanged(this, EventArgs.Empty);
         }
         else
         {
@@ -769,11 +783,35 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Back to a normal, resizable window — at its pre-fullscreen size and position if it was fullscreen.</summary>
     private void LeaveFullscreen()
     {
+        bool wasFullscreen = _fullscreen;
         _fullscreen = false;
-        WindowState = WindowState.Normal;
+        Topmost = false;
         ResizeMode = ResizeMode.CanResize;
+        WindowState = WindowState.Normal;
+        if (wasFullscreen && !_boundsBeforeFullscreen.IsEmpty)
+        {
+            Left = _boundsBeforeFullscreen.Left;
+            Top = _boundsBeforeFullscreen.Top;
+            Width = _boundsBeforeFullscreen.Width;
+            Height = _boundsBeforeFullscreen.Height;
+        }
+        Window_StateChanged(this, EventArgs.Empty);
+    }
+
+    // Only stay above other windows (and the taskbar) while fullscreen and in use, so Alt+Tab still works.
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        if (_fullscreen) Topmost = true;
+    }
+
+    protected override void OnDeactivated(EventArgs e)
+    {
+        base.OnDeactivated(e);
+        if (_fullscreen) Topmost = false;
     }
 
     private void Window_StateChanged(object sender, EventArgs e)
@@ -792,7 +830,7 @@ public partial class MainWindow : Window
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == NativeMethods.WM_GETMINMAXINFO)
-            NativeMethods.ApplyMaximizedBounds(hwnd, lParam, _fullscreen);
+            NativeMethods.ApplyMaximizedBounds(hwnd, lParam);
         return IntPtr.Zero;
     }
 
@@ -817,7 +855,9 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
     {
-        var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+        var bounds = _fullscreen ? _boundsBeforeFullscreen
+            : WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height)
+            : RestoreBounds;
         if (!bounds.IsEmpty)
         {
             _settings.Left = bounds.Left;
