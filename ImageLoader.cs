@@ -4,7 +4,10 @@ using System.Windows.Media.Imaging;
 
 namespace ImageViewer;
 
-internal sealed record LoadedImage(string Path, BitmapSource Bitmap, DateTime LastWriteUtc);
+/// <summary>A decoded image. Animated GIFs also carry every composited frame and how long to show each.</summary>
+internal sealed record LoadedImage(
+    string Path, BitmapSource Bitmap, DateTime LastWriteUtc,
+    IReadOnlyList<BitmapSource>? Frames = null, IReadOnlyList<TimeSpan>? Delays = null);
 
 internal static class ImageLoader
 {
@@ -17,8 +20,10 @@ internal static class ImageLoader
         var lastWrite = File.GetLastWriteTimeUtc(path);
         using var stream = new MemoryStream(File.ReadAllBytes(path));
         var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
-        var frame = decoder.Frames[0];
+        if (decoder is GifBitmapDecoder && GifComposer.Compose(decoder) is { } animation)
+            return new LoadedImage(path, animation.Frames[0], lastWrite, animation.Frames, animation.Delays);
 
+        var frame = decoder.Frames[0];
         BitmapSource bitmap = ApplyOrientation(frame, ReadOrientation(frame));
         if (bitmap != frame)
             bitmap = new CachedBitmap(bitmap, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);

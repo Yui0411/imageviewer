@@ -55,6 +55,14 @@ internal sealed class FolderNavigator
         if (Count > 0) Index = Math.Clamp(index, 0, Count - 1);
     }
 
+    /// <summary>Drops the current file (e.g. after it was deleted); the next image becomes current, or the last one if it was at the end.</summary>
+    public void RemoveCurrent()
+    {
+        if (Index < 0) return;
+        _files.RemoveAt(Index);
+        Index = _files.Count == 0 ? -1 : Math.Min(Index, _files.Count - 1);
+    }
+
     private int Wrap(int i) => ((i % Count) + Count) % Count;
 
     private static List<string> Scan(string dir)

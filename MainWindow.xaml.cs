@@ -42,11 +42,15 @@ public partial class MainWindow : Window
     private int _pendingTurns;
 
     private readonly DispatcherTimer _toastTimer = new();
+    private readonly DispatcherTimer _animationTimer = new();
+    private int _animationFrame;
 
     public MainWindow()
     {
         InitializeComponent();
         RestorePlacement();
+        BuildHelp();
+        _animationTimer.Tick += AnimationTimer_Tick;
         _toastTimer.Tick += (_, _) =>
         {
             _toastTimer.Stop();
@@ -89,6 +93,7 @@ public partial class MainWindow : Window
         if (version != _loadVersion) return; // the user already moved on to another image
 
         _image = image;
+        _animationTimer.Stop();
         if (image == null)
         {
             ImageView.Source = null;
@@ -103,9 +108,40 @@ public partial class MainWindow : Window
             ImageView.Source = image.Bitmap;
             UpdateImageSize();
             FitToWindow();
+            if (image.Frames is { Count: > 1 })
+            {
+                _animationFrame = 0;
+                _animationTimer.Interval = image.Delays![0];
+                _animationTimer.Start();
+            }
         }
         UpdateInfo();
         PreloadNeighbors();
+    }
+
+    private void AnimationTimer_Tick(object? sender, EventArgs e)
+    {
+        if (_image?.Frames is not { Count: > 1 } frames)
+        {
+            _animationTimer.Stop();
+            return;
+        }
+        _animationFrame = (_animationFrame + 1) % frames.Count;
+        ImageView.Source = frames[_animationFrame];
+        _animationTimer.Interval = _image.Delays![_animationFrame];
+    }
+
+    /// <summary>Clears the view after the last image in the folder was deleted.</summary>
+    private void ShowEmpty()
+    {
+        _loadVersion++;
+        _image = null;
+        _animationTimer.Stop();
+        ImageView.Source = null;
+        FileNameText.Text = "";
+        Title = "Image Viewer";
+        ShowMessage("Drop an image here, or press Ctrl+O");
+        UpdateInfo();
     }
 
     private Task<LoadedImage> GetImageAsync(string path)
@@ -235,6 +271,7 @@ public partial class MainWindow : Window
     private void ShowRotatedPreview(int clockwiseTurns)
     {
         if (_image == null) return;
+        _animationTimer.Stop();
         var preview = new TransformedBitmap(_image.Bitmap, new RotateTransform(90 * clockwiseTurns));
         preview.Freeze();
         _image = _image with { Bitmap = preview };
@@ -244,6 +281,147 @@ public partial class MainWindow : Window
     }
 
     private static bool SamePath(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    // ---------------------------------------------------------------- file actions
+
+    private void DeleteCurrent()
+    {
+        var path = _nav.Current;
+        if (path == null) return;
+        if (_rotating && SamePath(path, _rotatingPath))
+        {
+            ShowToast("Still saving the rotation — try again in a moment.", warning: false);
+            return;
+        }
+        if (!ShellActions.MoveToRecycleBin(path, new WindowInteropHelper(this).Handle))
+        {
+            if (File.Exists(path)) ShowToast($"Couldn't move {Path.GetFileName(path)} to the Recycle Bin.");
+            return;
+        }
+
+        _cache.Remove(path);
+        _nav.RemoveCurrent();
+        if (_nav.Current == null) ShowEmpty();
+        else ShowCurrent();
+        ShowToast($"Moved {Path.GetFileName(path)} to the Recycle Bin", warning: false);
+    }
+
+    /// <summary>Copies both the picture (for pasting into apps) and the file (for pasting in Explorer).</summary>
+    private void CopyCurrent()
+    {
+        if (_nav.Current is not { } path || _image == null) return;
+        try
+        {
+            var data = new DataObject();
+            data.SetImage(_image.Bitmap);
+            data.SetFileDropList(new System.Collections.Specialized.StringCollection { path });
+            Clipboard.SetDataObject(data, copy: true);
+            ShowToast("Copied", warning: false);
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            ShowToast("Couldn't copy — the clipboard is busy. Try again.");
+        }
+    }
+
+    private void ShowInExplorer()
+    {
+        if (_nav.Current is { } path) ShellActions.ShowInExplorer(path);
+    }
+
+    private void RegisterAsDefault()
+    {
+        var exe = Environment.ProcessPath ?? "";
+        var answer = MessageBox.Show(this,
+            "This adds Image Viewer to Windows' list of image apps, for your user account only " +
+            "(no admin rights needed, and it can be removed again from this menu).\n\n" +
+            $"Files will open with:\n{exe}\n\n" +
+            "If you move this program later, run this again from its new location.\n\n" +
+            "Windows will then open Settings → Default apps. Under \"Photo viewer\", choose Image Viewer.",
+            "Set as default image viewer", MessageBoxButton.OKCancel, MessageBoxImage.Information);
+        if (answer != MessageBoxResult.OK) return;
+        try
+        {
+            DefaultAppRegistration.Register();
+            DefaultAppRegistration.OpenDefaultAppsSettings();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            ShowToast($"Couldn't register: {ex.Message}");
+        }
+    }
+
+    private void UnregisterAsDefault()
+    {
+        var answer = MessageBox.Show(this,
+            "Remove Image Viewer from Windows' list of image apps? If it's currently your default, Windows will " +
+            "switch back to its own photo app.",
+            "Remove registration", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+        if (answer != MessageBoxResult.OK) return;
+        try
+        {
+            DefaultAppRegistration.Unregister();
+            ShowToast("Removed from Windows image apps", warning: false);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            ShowToast($"Couldn't remove registration: {ex.Message}");
+        }
+    }
+
+    // ---------------------------------------------------------------- help
+
+    private static readonly (string Keys, string Action)[] Shortcuts =
+    {
+        ("← / →", "Previous / next image"),
+        ("Home / End", "First / last image"),
+        ("R", "Rotate clockwise (saves the file)"),
+        ("Shift+R", "Rotate counter-clockwise"),
+        ("Scroll, + / −", "Zoom"),
+        ("Drag", "Pan when zoomed in, otherwise move the window"),
+        ("Double-click, 0", "Fit to window / actual size"),
+        ("F11", "Fullscreen"),
+        ("Esc", "Leave fullscreen, or close"),
+        ("Ctrl+C", "Copy image"),
+        ("Ctrl+E", "Show in Explorer"),
+        ("Del", "Move to Recycle Bin"),
+        ("Ctrl+O", "Open a file"),
+        ("Right-click", "Menu"),
+    };
+
+    private void BuildHelp()
+    {
+        HelpGrid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = GridLength.Auto });
+        HelpGrid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = GridLength.Auto });
+        for (int i = 0; i < Shortcuts.Length; i++)
+        {
+            HelpGrid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+            AddHelpCell(Shortcuts[i].Keys, i, 0, "#FFFFFF");
+            AddHelpCell(Shortcuts[i].Action, i, 1, "#BBBBBB");
+        }
+    }
+
+    private void AddHelpCell(string text, int row, int column, string color)
+    {
+        var cell = new System.Windows.Controls.TextBlock
+        {
+            Text = text,
+            FontSize = 13,
+            Foreground = (Brush)new BrushConverter().ConvertFromString(color)!,
+            Margin = new Thickness(0, 3, column == 0 ? 28 : 0, 3),
+        };
+        System.Windows.Controls.Grid.SetRow(cell, row);
+        System.Windows.Controls.Grid.SetColumn(cell, column);
+        HelpGrid.Children.Add(cell);
+    }
+
+    private void ToggleHelp(bool show) => HelpPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+
+    private void HelpPanel_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        ToggleHelp(false);
+        e.Handled = true;
+    }
 
     private void UpdateInfo()
     {
@@ -432,6 +610,13 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (HelpPanel.Visibility == Visibility.Visible)
+        {
+            ToggleHelp(false);
+            e.Handled = true;
+            return;
+        }
+
         bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
         switch (e.Key)
         {
@@ -449,6 +634,10 @@ public partial class MainWindow : Window
             case Key.OemMinus or Key.Subtract: ZoomTo(_scale / ZoomStep, ViewportCenter); break;
             case Key.O when ctrl: ShowOpenDialog(); break;
             case Key.R when !ctrl: Rotate(Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 3 : 1); break;
+            case Key.C when ctrl: CopyCurrent(); break;
+            case Key.E when ctrl: ShowInExplorer(); break;
+            case Key.Delete: DeleteCurrent(); break;
+            case Key.F1: ToggleHelp(true); break;
             default: return;
         }
         e.Handled = true;
@@ -469,7 +658,40 @@ public partial class MainWindow : Window
     private void PrevButton_Click(object sender, RoutedEventArgs e) => Navigate(-1);
     private void NextButton_Click(object sender, RoutedEventArgs e) => Navigate(1);
     private void RotateButton_Click(object sender, RoutedEventArgs e) => Rotate(1);
+    private void RotateCcw_Click(object sender, RoutedEventArgs e) => Rotate(3);
+    private void Copy_Click(object sender, RoutedEventArgs e) => CopyCurrent();
+    private void ShowInExplorer_Click(object sender, RoutedEventArgs e) => ShowInExplorer();
+    private void Delete_Click(object sender, RoutedEventArgs e) => DeleteCurrent();
+    private void RegisterDefault_Click(object sender, RoutedEventArgs e) => RegisterAsDefault();
+    private void UnregisterDefault_Click(object sender, RoutedEventArgs e) => UnregisterAsDefault();
+    private void Help_Click(object sender, RoutedEventArgs e) => ToggleHelp(true);
     private void OpenButton_Click(object sender, RoutedEventArgs e) => ShowOpenDialog();
+
+    private void MoreButton_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = (System.Windows.Controls.ContextMenu)Resources["MainMenu"];
+        menu.PlacementTarget = (UIElement)sender;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>Greys out actions that need an image, and shows only the relevant registration item.</summary>
+    private void MainMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        bool registered = DefaultAppRegistration.IsRegistered;
+        foreach (var item in ((System.Windows.Controls.ContextMenu)sender).Items.OfType<System.Windows.Controls.MenuItem>())
+        {
+            switch (item.Tag as string)
+            {
+                case "register": item.Visibility = registered ? Visibility.Collapsed : Visibility.Visible; break;
+                case "unregister": item.Visibility = registered ? Visibility.Visible : Visibility.Collapsed; break;
+                default:
+                    if (!Equals(item.InputGestureText, "Ctrl+O") && !Equals(item.InputGestureText, "F1"))
+                        item.IsEnabled = _image != null;
+                    break;
+            }
+        }
+    }
     private void FullscreenButton_Click(object sender, RoutedEventArgs e) => SetFullscreen(!_fullscreen);
     private void MinimizeButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     private void MaximizeButton_Click(object sender, RoutedEventArgs e) => ToggleMaximize();

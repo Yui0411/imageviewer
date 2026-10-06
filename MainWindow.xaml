@@ -12,9 +12,26 @@
                       CornerRadius="0" UseAeroCaptionButtons="False"/>
     </WindowChrome.WindowChrome>
 
+    <Window.Resources>
+        <!-- Opened by right-clicking the image or the "more" toolbar button -->
+        <ContextMenu x:Key="MainMenu" Opened="MainMenu_Opened">
+            <MenuItem Header="Rotate clockwise" InputGestureText="R" Click="RotateButton_Click"/>
+            <MenuItem Header="Rotate counter-clockwise" InputGestureText="Shift+R" Click="RotateCcw_Click"/>
+            <Separator/>
+            <MenuItem Header="Copy" InputGestureText="Ctrl+C" Click="Copy_Click"/>
+            <MenuItem Header="Show in Explorer" InputGestureText="Ctrl+E" Click="ShowInExplorer_Click"/>
+            <MenuItem Header="Delete" InputGestureText="Del" Click="Delete_Click"/>
+            <Separator/>
+            <MenuItem Header="Open…" InputGestureText="Ctrl+O" Click="OpenButton_Click"/>
+            <MenuItem Tag="register" Header="Set as default image viewer…" Click="RegisterDefault_Click"/>
+            <MenuItem Tag="unregister" Header="Remove from Windows image apps…" Click="UnregisterDefault_Click"/>
+            <MenuItem Header="Keyboard shortcuts" InputGestureText="F1" Click="Help_Click"/>
+        </ContextMenu>
+    </Window.Resources>
+
     <Grid x:Name="Root">
         <!-- Image area: scroll to zoom, drag to pan (or move the window when the image fits) -->
-        <Grid x:Name="Viewport" ClipToBounds="True" Background="Transparent"
+        <Grid x:Name="Viewport" ClipToBounds="True" Background="Transparent" ContextMenu="{StaticResource MainMenu}"
               MouseLeftButtonDown="Viewport_MouseLeftButtonDown" MouseLeftButtonUp="Viewport_MouseLeftButtonUp"
               MouseMove="Viewport_MouseMove" MouseWheel="Viewport_MouseWheel" SizeChanged="Viewport_SizeChanged">
             <Image x:Name="ImageView" HorizontalAlignment="Left" VerticalAlignment="Top" Stretch="Fill"
@@ -45,13 +62,24 @@
             </StackPanel>
         </Border>
 
+        <!-- Keyboard shortcut reference (F1); any click or key closes it -->
+        <Border x:Name="HelpPanel" Visibility="Collapsed" Background="#B0000000" MouseDown="HelpPanel_MouseDown">
+            <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="#F0202020"
+                    CornerRadius="8" Padding="28,22">
+                <StackPanel>
+                    <TextBlock Text="Keyboard shortcuts" Foreground="White" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,14"/>
+                    <Grid x:Name="HelpGrid"/>
+                </StackPanel>
+            </Border>
+        </Border>
+
         <!-- Toolbar, shown when hovering near the top edge -->
         <Border x:Name="Toolbar" VerticalAlignment="Top" Height="40" Background="#D0101010" Opacity="0"
                 MouseLeftButtonDown="Toolbar_MouseLeftButtonDown">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <Button Style="{StaticResource ToolButton}" Content="&#xE7AD;" ToolTip="Rotate clockwise (R)" Click="RotateButton_Click"/>
-                    <Button Style="{StaticResource ToolButton}" Content="&#xE8E5;" ToolTip="Open (Ctrl+O)" Click="OpenButton_Click"/>
+                    <Button Style="{StaticResource ToolButton}" Content="&#xE712;" ToolTip="More" Click="MoreButton_Click"/>
                     <Button Style="{StaticResource ToolButton}" Content="&#xE740;" ToolTip="Fullscreen (F11)" Click="FullscreenButton_Click"/>
                     <Button Style="{StaticResource ToolButton}" Content="&#xE921;" ToolTip="Minimize" Click="MinimizeButton_Click"/>
                     <Button x:Name="MaximizeButton" Style="{StaticResource ToolButton}" Content="&#xE922;" ToolTip="Maximize" Click="MaximizeButton_Click"/>
