@@ -4,8 +4,8 @@ using System.Windows.Media.Imaging;
 
 namespace ImageViewer;
 
-/// <summary>A rotation that was refused or failed; the message is shown to the user and the file is untouched.</summary>
-internal sealed class RotateException(string message) : Exception(message);
+/// <summary>An edit (rotation or crop) that was refused or failed; the message is shown to the user and the file is untouched.</summary>
+internal sealed class EditException(string message) : Exception(message);
 
 /// <summary>
 /// Rotates image files in place without losing quality.
@@ -15,14 +15,14 @@ internal sealed class RotateException(string message) : Exception(message);
 /// </summary>
 internal static class ImageRotator
 {
-    private static readonly HashSet<string> JpegExtensions = new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".jpe", ".jfif" };
+    internal static readonly HashSet<string> JpegExtensions = new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".jpe", ".jfif" };
     private static readonly HashSet<string> LosslessExtensions = new(StringComparer.OrdinalIgnoreCase) { ".png", ".bmp" };
 
-    private const BitmapCreateOptions DecodeOptions = BitmapCreateOptions.PreservePixelFormat | BitmapCreateOptions.IgnoreColorProfile;
+    internal const BitmapCreateOptions DecodeOptions = BitmapCreateOptions.PreservePixelFormat | BitmapCreateOptions.IgnoreColorProfile;
 
     // A lossless JPEG transcode decodes to within a few levels of the expected pixels (chroma upsampling rounding);
     // a lossy re-encode differs by much more.
-    private const int JpegTolerance = 6;
+    internal const int JpegTolerance = 6;
 
     public static bool CanRotate(string path)
     {
@@ -54,10 +54,10 @@ internal static class ImageRotator
 
     private static void EnsureJpegAligned(byte[] data, (int turns, bool mirror) transform)
     {
-        var header = JpegHeader.Read(data) ?? throw new RotateException("This file isn't a valid JPEG.");
+        var header = JpegHeader.Read(data) ?? throw new EditException("This file isn't a valid JPEG.");
         bool movesPixels = transform.turns != 0 || transform.mirror; // otherwise only the orientation tag changes
         if (movesPixels && (header.Width % header.BlockWidth != 0 || header.Height % header.BlockHeight != 0))
-            throw new RotateException(
+            throw new EditException(
                 $"Can't rotate losslessly: {header.Width} × {header.Height} isn't a multiple of the JPEG block size " +
                 $"({header.BlockWidth} × {header.BlockHeight}). The file was not changed.");
     }
@@ -122,7 +122,7 @@ internal static class ImageRotator
         return result;
     }
 
-    private static byte[] Encode(BitmapEncoder encoder, BitmapFrame frame)
+    internal static byte[] Encode(BitmapEncoder encoder, BitmapFrame frame)
     {
         encoder.Frames.Add(frame);
         using var output = new MemoryStream();
@@ -136,7 +136,7 @@ internal static class ImageRotator
     /// Combines the file's EXIF orientation with the requested rotation into a single transform applied to the stored
     /// pixels: optionally mirror horizontally, then rotate <c>turns</c> × 90° clockwise.
     /// </summary>
-    private static (int turns, bool mirror) Combine(int orientation, int clockwiseTurns)
+    internal static (int turns, bool mirror) Combine(int orientation, int clockwiseTurns)
     {
         var (turns, mirror) = orientation switch
         {
@@ -175,7 +175,7 @@ internal static class ImageRotator
         return copy;
     }
 
-    private static BitmapFrame Decode(byte[] bytes)
+    internal static BitmapFrame Decode(byte[] bytes)
     {
         using var stream = new MemoryStream(bytes);
         return BitmapDecoder.Create(stream, DecodeOptions, BitmapCacheOption.OnLoad).Frames[0];
@@ -191,11 +191,11 @@ internal static class ImageRotator
         for (int i = 0; ok && i < expected.Length; i++)
             ok = Math.Abs(expected[i] - actual[i]) <= tolerance;
         if (!ok)
-            throw new RotateException("This image couldn't be rotated without losing quality, so the file was not changed.");
+            throw new EditException("This image couldn't be rotated without losing quality, so the file was not changed.");
     }
 
     /// <summary>Raw pixels; converted to 16 bits per channel only if the format changed, so no precision is hidden.</summary>
-    private static (PixelFormat format, byte[] data) Pixels(BitmapSource source, PixelFormat? compareAs = null)
+    internal static (PixelFormat format, byte[] data) Pixels(BitmapSource source, PixelFormat? compareAs = null)
     {
         if (compareAs is { } target && target != source.Format)
             source = new FormatConvertedBitmap(source, PixelFormats.Rgba64, null, 0);
@@ -206,9 +206,9 @@ internal static class ImageRotator
     }
 
     /// <summary>Writes to a temporary file next to the original, then swaps it in, so a failure never leaves a broken image.</summary>
-    private static void Replace(string path, byte[] contents)
+    internal static void Replace(string path, byte[] contents)
     {
-        var temp = path + ".rotating.tmp";
+        var temp = path + ".saving.tmp";
         try
         {
             File.WriteAllBytes(temp, contents);
@@ -227,7 +227,7 @@ internal static class ImageRotator
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            throw new RotateException($"Couldn't save the rotated image: {ex.Message}");
+            throw new EditException($"Couldn't save the rotated image: {ex.Message}");
         }
         finally
         {
@@ -237,8 +237,11 @@ internal static class ImageRotator
 }
 
 /// <summary>Image size and block (MCU) size from a JPEG's start-of-frame header.</summary>
-internal sealed record JpegHeader(int Width, int Height, int BlockWidth, int BlockHeight)
+internal sealed record JpegHeader(int Width, int Height, int BlockWidth, int BlockHeight, int FrameMarker)
 {
+    /// <summary>Baseline or extended sequential Huffman — the kinds that can be cropped losslessly.</summary>
+    public bool IsSequential => FrameMarker is 0xC0 or 0xC1;
+
     public static JpegHeader? Read(byte[] data)
     {
         if (data.Length < 4 || data[0] != 0xFF || data[1] != 0xD8) return null;
@@ -270,8 +273,8 @@ internal sealed record JpegHeader(int Width, int Height, int BlockWidth, int Blo
                 }
                 // A single-component (grayscale) image is coded in 8×8 blocks regardless of its sampling factors.
                 return components == 1
-                    ? new JpegHeader(width, height, 8, 8)
-                    : new JpegHeader(width, height, 8 * maxH, 8 * maxV);
+                    ? new JpegHeader(width, height, 8, 8, marker)
+                    : new JpegHeader(width, height, 8 * maxH, 8 * maxV, marker);
             }
             pos += 2 + length;
         }

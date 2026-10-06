@@ -228,9 +228,9 @@ public partial class MainWindow : Window
             // Turns already queued haven't been saved yet, so check against the file's current state plus all of them.
             ImageRotator.EnsureCanRotate(path, _pendingTurns + clockwiseTurns);
         }
-        catch (Exception ex) when (ex is RotateException or IOException or UnauthorizedAccessException or NotSupportedException)
+        catch (Exception ex) when (ex is EditException or IOException or UnauthorizedAccessException or NotSupportedException)
         {
-            ShowToast(ex is RotateException ? ex.Message : $"Couldn't rotate: {ex.Message}");
+            ShowToast(ex is EditException ? ex.Message : $"Couldn't rotate: {ex.Message}");
             return;
         }
 
@@ -254,7 +254,7 @@ public partial class MainWindow : Window
                 });
             }
         }
-        catch (RotateException ex)
+        catch (EditException ex)
         {
             error = ex.Message;
         }
