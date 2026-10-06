@@ -23,6 +23,10 @@ internal static class ShellActions
         return result == 0 && !op.fAnyOperationsAborted && !File.Exists(path);
     }
 
+    /// <summary>Tells Explorer the file's contents changed, so open folder windows redraw its thumbnail now.</summary>
+    public static void NotifyFileChanged(string path) =>
+        SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSH, path, IntPtr.Zero);
+
     public static void ShowInExplorer(string path) =>
         Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
 
@@ -48,4 +52,11 @@ internal static class ShellActions
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern int SHFileOperation(ref SHFILEOPSTRUCT op);
+
+    private const int SHCNE_UPDATEITEM = 0x00002000;
+    private const uint SHCNF_PATHW = 0x0005;
+    private const uint SHCNF_FLUSH = 0x1000;
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern void SHChangeNotify(int eventId, uint flags, string item1, IntPtr item2);
 }

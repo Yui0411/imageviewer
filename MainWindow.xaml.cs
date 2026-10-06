@@ -247,7 +247,11 @@ public partial class MainWindow : Window
             while ((turns = ((_pendingTurns % 4) + 4) % 4) != 0)
             {
                 _pendingTurns = 0;
-                await Task.Run(() => ImageRotator.Rotate(path, turns));
+                await Task.Run(() =>
+                {
+                    ImageRotator.Rotate(path, turns);
+                    ShellActions.NotifyFileChanged(path); // refresh Explorer's thumbnail right away
+                });
             }
         }
         catch (RotateException ex)
