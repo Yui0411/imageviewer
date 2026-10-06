@@ -52,6 +52,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         RestorePlacement();
         BuildHelp();
+        BuildCropBar();
         _animationTimer.Tick += AnimationTimer_Tick;
         _toastTimer.Tick += (_, _) =>
         {
@@ -67,6 +68,7 @@ public partial class MainWindow : Window
             ShowMessage($"File not found:\n{path}");
             return;
         }
+        ExitCrop();
         _nav.Open(path);
         ShowCurrent();
     }
@@ -79,6 +81,7 @@ public partial class MainWindow : Window
         if (path == null) return;
 
         int version = ++_loadVersion;
+        if (_undo is { } undo && !SamePath(undo.Path, path)) _undo = null; // undo only lasts while on the cropped image
         FileNameText.Text = Path.GetFileName(path);
         Title = $"{Path.GetFileName(path)} - Image Viewer";
 
@@ -138,6 +141,7 @@ public partial class MainWindow : Window
     {
         _loadVersion++;
         _image = null;
+        _undo = null;
         _animationTimer.Stop();
         ImageView.Source = null;
         FileNameText.Text = "";
@@ -211,7 +215,7 @@ public partial class MainWindow : Window
     private async void Rotate(int clockwiseTurns)
     {
         var path = _nav.Current;
-        if (path == null || _image == null) return;
+        if (path == null || _image == null || _cropping) return;
         if (!ImageRotator.CanRotate(path))
         {
             ShowToast($"Rotating {Path.GetExtension(path).TrimStart('.').ToUpperInvariant()} files isn't supported.");
@@ -234,6 +238,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        _undo = null; // Ctrl+Z restores the pre-crop file, which would silently drop this rotation
         ShowRotatedPreview(clockwiseTurns);
         _pendingTurns += clockwiseTurns;
         if (_rotating) return; // the running save loop will pick these turns up
@@ -383,6 +388,8 @@ public partial class MainWindow : Window
         ("Home / End", "First / last image"),
         ("R", "Rotate clockwise (saves the file)"),
         ("Shift+R", "Rotate counter-clockwise"),
+        ("C", "Crop (Enter applies, Esc cancels)"),
+        ("Ctrl+Z", "Undo the last crop"),
         ("Scroll, + / −", "Zoom"),
         ("Drag", "Pan when zoomed in, otherwise move the window"),
         ("Double-click, 0", "Fit to window / actual size"),
@@ -393,6 +400,12 @@ public partial class MainWindow : Window
         ("Del", "Move to Recycle Bin"),
         ("Ctrl+O", "Open a file"),
         ("Right-click", "Menu"),
+        ("", ""),
+        ("While cropping", ""),
+        ("Drag", "Move the box, its edges, or draw a new one"),
+        ("Arrow keys", "Nudge the box (Shift: further)"),
+        ("G / X", "Grid on/off / swap landscape-portrait"),
+        ("Middle-drag", "Pan when zoomed in"),
     };
 
     private void BuildHelp()
@@ -416,6 +429,7 @@ public partial class MainWindow : Window
             Foreground = (Brush)new BrushConverter().ConvertFromString(color)!,
             Margin = new Thickness(0, 3, column == 0 ? 28 : 0, 3),
         };
+        if (column == 0 && Shortcuts[row].Action.Length == 0) cell.FontWeight = FontWeights.SemiBold; // section heading
         System.Windows.Controls.Grid.SetRow(cell, row);
         System.Windows.Controls.Grid.SetColumn(cell, column);
         HelpGrid.Children.Add(cell);
@@ -469,12 +483,32 @@ public partial class MainWindow : Window
     /// <summary>Scale that fits the whole image in the window. Small images are never enlarged.</summary>
     private double FitScale()
     {
-        if (_image == null || Viewport.ActualWidth <= 0 || Viewport.ActualHeight <= 0) return 1;
-        return Math.Min(1, Math.Min(Viewport.ActualWidth / ImageView.Width, Viewport.ActualHeight / ImageView.Height));
+        var area = ViewArea;
+        if (_image == null || area.Width <= 0 || area.Height <= 0) return 1;
+        return Math.Min(1, Math.Min(area.Width / ImageView.Width, area.Height / ImageView.Height));
     }
 
-    private bool CanPan() => _image != null
-        && (ImageView.Width * _scale > Viewport.ActualWidth + 0.5 || ImageView.Height * _scale > Viewport.ActualHeight + 0.5);
+    /// <summary>
+    /// The part of the viewport the image is fitted into. In crop mode it leaves a margin (so the crop handles at the
+    /// image's edges can be grabbed) and keeps clear of the crop bar.
+    /// </summary>
+    private Rect ViewArea
+    {
+        get
+        {
+            double w = Viewport.ActualWidth, h = Viewport.ActualHeight;
+            if (!_cropping) return new Rect(0, 0, w, h);
+            const double margin = 24;
+            double bottom = Math.Max(CropBar.ActualHeight, 40) + CropBar.Margin.Bottom + 16;
+            return new Rect(margin, margin, Math.Max(1, w - 2 * margin), Math.Max(1, h - margin - bottom));
+        }
+    }
+
+    private bool CanPan()
+    {
+        var area = ViewArea;
+        return _image != null && (ImageView.Width * _scale > area.Width + 0.5 || ImageView.Height * _scale > area.Height + 0.5);
+    }
 
     private void FitToWindow()
     {
@@ -511,20 +545,27 @@ public partial class MainWindow : Window
     private void ClampOffset()
     {
         double w = ImageView.Width * _scale, h = ImageView.Height * _scale;
-        double vw = Viewport.ActualWidth, vh = Viewport.ActualHeight;
-        _offset.X = w <= vw ? (vw - w) / 2 : Math.Clamp(_offset.X, vw - w, 0);
-        _offset.Y = h <= vh ? (vh - h) / 2 : Math.Clamp(_offset.Y, vh - h, 0);
+        var area = ViewArea;
+        _offset.X = w <= area.Width ? area.X + (area.Width - w) / 2 : Math.Clamp(_offset.X, area.Right - w, area.X);
+        _offset.Y = h <= area.Height ? area.Y + (area.Height - h) / 2 : Math.Clamp(_offset.Y, area.Bottom - h, area.Y);
     }
 
     private void ApplyTransform()
     {
         ImageTransform.Matrix = new Matrix(_scale, 0, 0, _scale, _offset.X, _offset.Y);
-        Viewport.Cursor = _panning ? Cursors.SizeAll : CanPan() ? Cursors.Hand : null;
+        if (!_cropping || _panning) Viewport.Cursor = _panning ? Cursors.SizeAll : CanPan() ? Cursors.Hand : null;
         UpdateInfo();
+        UpdateCropVisuals();
     }
 
     private void Viewport_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (_cropping)
+        {
+            CropMouseDown(e);
+            e.Handled = true;
+            return;
+        }
         if (e.ClickCount == 2)
         {
             ToggleFitActual(e.GetPosition(Viewport));
@@ -546,18 +587,56 @@ public partial class MainWindow : Window
 
     private void Viewport_MouseMove(object sender, MouseEventArgs e)
     {
-        if (!_panning) return;
-        _offset = _panOrigin + (e.GetPosition(Viewport) - _panStart);
-        ClampOffset();
-        ApplyTransform();
+        if (_panning)
+        {
+            _offset = _panOrigin + (e.GetPosition(Viewport) - _panStart);
+            ClampOffset();
+            ApplyTransform();
+        }
+        else if (_cropping)
+        {
+            CropMouseMove(e);
+        }
     }
 
     private void Viewport_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_cropping && !_panning)
+        {
+            CropMouseUp();
+            return;
+        }
+        EndPan();
+    }
+
+    /// <summary>Middle-button drag pans (also in crop mode, where the left button edits the crop box).</summary>
+    private void Viewport_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle || !CanPan()) return;
+        _panning = true;
+        _panStart = e.GetPosition(Viewport);
+        _panOrigin = _offset;
+        Viewport.CaptureMouse();
+        ApplyTransform();
+        e.Handled = true;
+    }
+
+    private void Viewport_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == MouseButton.Middle) EndPan();
+    }
+
+    private void EndPan()
     {
         if (!_panning) return;
         _panning = false;
         Viewport.ReleaseMouseCapture();
         ApplyTransform();
+    }
+
+    private void Viewport_ContextMenuOpening(object sender, System.Windows.Controls.ContextMenuEventArgs e)
+    {
+        if (_cropping) e.Handled = true; // no menu (rotate, delete, ...) in the middle of a crop
     }
 
     private void Viewport_MouseWheel(object sender, MouseWheelEventArgs e)
@@ -590,7 +669,7 @@ public partial class MainWindow : Window
         if (_panning) return;
         var p = e.GetPosition(Root);
         bool nearTop = p.Y <= Toolbar.ActualHeight + 20;
-        bool canNavigate = _nav.Count > 1;
+        bool canNavigate = _nav.Count > 1 && !_cropping;
         Fade(Toolbar, nearTop);
         Fade(PrevButton, canNavigate && !nearTop && p.X <= SideHoverWidth);
         Fade(NextButton, canNavigate && !nearTop && p.X >= Root.ActualWidth - SideHoverWidth);
@@ -622,6 +701,21 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+        if (Keyboard.FocusedElement is System.Windows.Controls.TextBox)
+        {
+            // Typing a custom ratio: let keys reach the box; Enter or Esc just leaves it.
+            if (e.Key is Key.Enter or Key.Escape)
+            {
+                Focus();
+                e.Handled = true;
+            }
+            return;
+        }
+        if (_cropping)
+        {
+            HandleCropKey(e);
+            return;
+        }
 
         bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
         switch (e.Key)
@@ -644,6 +738,8 @@ public partial class MainWindow : Window
             case Key.E when ctrl: ShowInExplorer(); break;
             case Key.Delete: DeleteCurrent(); break;
             case Key.F1: ToggleHelp(true); break;
+            case Key.C when !ctrl: EnterCrop(); break;
+            case Key.Z when ctrl: UndoCrop(); break;
             default: return;
         }
         e.Handled = true;
@@ -716,6 +812,7 @@ public partial class MainWindow : Window
 
     private void MoreButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_cropping) return;
         var menu = (System.Windows.Controls.ContextMenu)Resources["MainMenu"];
         menu.PlacementTarget = (UIElement)sender;
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
@@ -732,6 +829,7 @@ public partial class MainWindow : Window
             {
                 case "register": item.Visibility = registered ? Visibility.Collapsed : Visibility.Visible; break;
                 case "unregister": item.Visibility = registered ? Visibility.Visible : Visibility.Collapsed; break;
+                case "undo": item.IsEnabled = _undo is { } undo && SamePath(undo.Path, _nav.Current); break;
                 default:
                     if (!Equals(item.InputGestureText, "Ctrl+O") && !Equals(item.InputGestureText, "F1"))
                         item.IsEnabled = _image != null;

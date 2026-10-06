@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace ImageViewer;
 
-/// <summary>Window placement persisted to %AppData%\ImageViewer\settings.json.</summary>
+/// <summary>Window placement and crop preferences persisted to %AppData%\ImageViewer\settings.json.</summary>
 internal sealed class WindowSettings
 {
     public double Left { get; set; } = double.NaN;
@@ -11,6 +11,11 @@ internal sealed class WindowSettings
     public double Width { get; set; } = 1000;
     public double Height { get; set; } = 700;
     public bool Maximized { get; set; }
+
+    public string CropRatio { get; set; } = "Free";
+    public bool CropPortrait { get; set; }
+    public bool CropGrid { get; set; } = true;
+    public string CropCustomRatio { get; set; } = "21:9";
 
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ImageViewer", "settings.json");

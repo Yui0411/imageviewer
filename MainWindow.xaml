@@ -17,6 +17,8 @@
         <ContextMenu x:Key="MainMenu" Opened="MainMenu_Opened">
             <MenuItem Header="Rotate clockwise" InputGestureText="R" Click="RotateButton_Click"/>
             <MenuItem Header="Rotate counter-clockwise" InputGestureText="Shift+R" Click="RotateCcw_Click"/>
+            <MenuItem Header="Crop…" InputGestureText="C" Click="CropButton_Click"/>
+            <MenuItem Tag="undo" Header="Undo crop" InputGestureText="Ctrl+Z" Click="UndoCrop_Click"/>
             <Separator/>
             <MenuItem Header="Copy" InputGestureText="Ctrl+C" Click="Copy_Click"/>
             <MenuItem Header="Show in Explorer" InputGestureText="Ctrl+E" Click="ShowInExplorer_Click"/>
@@ -33,7 +35,8 @@
         <!-- Image area: scroll to zoom, drag to pan (or move the window when the image fits) -->
         <Grid x:Name="Viewport" ClipToBounds="True" Background="Transparent" ContextMenu="{StaticResource MainMenu}"
               MouseLeftButtonDown="Viewport_MouseLeftButtonDown" MouseLeftButtonUp="Viewport_MouseLeftButtonUp"
-              MouseMove="Viewport_MouseMove" MouseWheel="Viewport_MouseWheel" SizeChanged="Viewport_SizeChanged">
+              MouseMove="Viewport_MouseMove" MouseWheel="Viewport_MouseWheel" SizeChanged="Viewport_SizeChanged"
+              MouseDown="Viewport_MouseDown" MouseUp="Viewport_MouseUp" ContextMenuOpening="Viewport_ContextMenuOpening">
             <!-- A Canvas never clips its children to the layout size, so the full image survives being scaled down;
                  the viewport's ClipToBounds does the clipping instead. -->
             <Canvas>
@@ -42,6 +45,15 @@
                         <MatrixTransform x:Name="ImageTransform"/>
                     </Image.RenderTransform>
                 </Image>
+            </Canvas>
+
+            <!-- Crop overlay: dimmed surroundings, the crop box, rule-of-thirds lines and resize handles.
+                 Positioned in code; mouse input is handled by the viewport. -->
+            <Canvas x:Name="CropLayer" Visibility="Collapsed" IsHitTestVisible="False">
+                <Path x:Name="CropShade" Fill="#A0000000"/>
+                <Path x:Name="CropGridLines" Stroke="#90FFFFFF" StrokeThickness="1"/>
+                <Rectangle x:Name="CropBorder" Stroke="White" StrokeThickness="1.5"/>
+                <Path x:Name="CropHandles" Fill="White" Stroke="#80000000" StrokeThickness="1"/>
             </Canvas>
             <TextBlock x:Name="MessageText" Foreground="#999" FontSize="15" TextWrapping="Wrap" TextAlignment="Center"
                        HorizontalAlignment="Center" VerticalAlignment="Center" Margin="40"
@@ -53,6 +65,37 @@
                 Opacity="0" Content="&#xE76B;" ToolTip="Previous (←)" Click="PrevButton_Click"/>
         <Button x:Name="NextButton" Style="{StaticResource NavButton}" HorizontalAlignment="Right"
                 Opacity="0" Content="&#xE76C;" ToolTip="Next (→)" Click="NextButton_Click"/>
+
+        <!-- Crop controls, shown in crop mode -->
+        <Border x:Name="CropBar" Visibility="Collapsed" VerticalAlignment="Bottom" HorizontalAlignment="Center"
+                Margin="12,0,12,18" Padding="8,6" CornerRadius="8" Background="#F01C1C1C" SizeChanged="CropBar_SizeChanged">
+            <WrapPanel Orientation="Horizontal">
+                <StackPanel x:Name="RatioPanel" Orientation="Horizontal" VerticalAlignment="Center"/>
+                <StackPanel x:Name="CustomRatioPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0"
+                            Visibility="Collapsed">
+                    <TextBox x:Name="CustomRatioW" Style="{StaticResource RatioBox}" TextChanged="CustomRatio_TextChanged"/>
+                    <TextBlock Text=":" Foreground="#CCC" Margin="4,0" VerticalAlignment="Center"/>
+                    <TextBox x:Name="CustomRatioH" Style="{StaticResource RatioBox}" TextChanged="CustomRatio_TextChanged"/>
+                </StackPanel>
+                <Border Width="1" Background="#40FFFFFF" Margin="6,4"/>
+                <Button Style="{StaticResource BarIconButton}" Content="&#xE8AB;" ToolTip="Swap landscape / portrait (X)"
+                        Click="CropSwap_Click"/>
+                <ToggleButton x:Name="CropGridToggle" Style="{StaticResource BarIconToggle}" ToolTip="Rule-of-thirds grid (G)"
+                              Click="CropGridToggle_Click">
+                    <Path Data="M0.5,0.5 H14.5 V14.5 H0.5 Z M5.5,0.5 V14.5 M9.5,0.5 V14.5 M0.5,5.5 H14.5 M0.5,9.5 H14.5"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                          StrokeThickness="1"/>
+                </ToggleButton>
+                <TextBlock x:Name="CropSizeText" Foreground="#CCC" FontSize="12" VerticalAlignment="Center"
+                           Margin="8,0" MinWidth="86" TextAlignment="Center"/>
+                <Border Width="1" Background="#40FFFFFF" Margin="6,4"/>
+                <Button Style="{StaticResource BarButton}" Content="Cancel" ToolTip="Esc" Click="CropCancel_Click"/>
+                <Button x:Name="CropSaveCopyButton" Style="{StaticResource BarButton}" Content="Save copy"
+                        ToolTip="Save the crop as a new file and keep the original" Click="CropSaveCopy_Click"/>
+                <Button x:Name="CropApplyButton" Style="{StaticResource AccentButton}" Content="Apply"
+                        ToolTip="Crop and overwrite the file (Enter) — Ctrl+Z undoes it" Click="CropApply_Click"/>
+            </WrapPanel>
+        </Border>
 
         <!-- Short-lived notice, e.g. why a rotation was refused -->
         <Border x:Name="Toast" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="20,0,20,28"
@@ -82,6 +125,7 @@
                 MouseLeftButtonUp="Toolbar_MouseLeftButtonUp">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="CropButton" Style="{StaticResource ToolButton}" Content="&#xE7A8;" ToolTip="Crop (C)" Click="CropButton_Click"/>
                     <Button Style="{StaticResource ToolButton}" Content="&#xE7AD;" ToolTip="Rotate clockwise (R)" Click="RotateButton_Click"/>
                     <Button Style="{StaticResource ToolButton}" Content="&#xE712;" ToolTip="More" Click="MoreButton_Click"/>
                     <Button Style="{StaticResource ToolButton}" Content="&#xE740;" ToolTip="Fullscreen (F11)" Click="FullscreenButton_Click"/>

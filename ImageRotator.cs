@@ -227,7 +227,7 @@ internal static class ImageRotator
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            throw new EditException($"Couldn't save the rotated image: {ex.Message}");
+            throw new EditException($"Couldn't save the image: {ex.Message}");
         }
         finally
         {
